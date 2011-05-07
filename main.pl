@@ -39,7 +39,7 @@ sub apply_parameters {
 }
 
 # Configure properties of web agent
-sub configure_client {
+sub configure_client   {
 
 }
 
@@ -72,7 +72,7 @@ sub verify_URL {
 }
 
 # Comment ...
-sub is_OK() {
+sub is_OK {
 
 }
 
