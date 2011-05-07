@@ -1,0 +1,126 @@
+1. Cíl projektu                                                                     
+                                                                     
+2. Popis
+
+3. Srovnání se sériovým øešením
+                                                                     
+
+
+Pseudokód hlavního vlákna 
+=========================
+
+1. Inicializace promìnných: (sub setup_environment)
+  fronty, èítaè vláken, defaultní nastavení  
+2. Spuštìní nultého vlákna
+(rodièovské vlákno musí poèkat na dokonèení všech vláken (bariéra) 
+3. Výpis výsledkù (webové rozhraní / soubor /  command line / ...) (sub get_output)
+                  
+
+
+Pseudokód worker vlákna (sub worker_thread)
+=======================
+
+1. Vezmi z fronty $pending_URLs
+2. Ovìø dostupnost (sub verify_URL)
+3. Zapiš výsledek do druhé fronty $visited_URLs
+4. Získané URL dej do fronty $pending_URLs
+5. Èekej interval uvedený v $global_settings{'request_interval'}
+6. Dokud je èítaè vláken menší než maximální poèet vláken v $global_settings{'max_thread_count'}, vytvoø nové vlákno.
+7. Navyš èítaè vláken o daný poèet.
+  (èítaè vláken musí být v mutexu)
+
+                           
+Ukládání seznamu URL
+====================
+
+Budou použity dvì FIFO fronty, jedna pro ukládání URL, které je tøeba provìøit, a druhá pro ukládání již provìøených URL.
+Pùjde o fronty z balíku Thread::Queue. Tento typ zajišuje thread-safe pøístup ke struktuøe, takže není potøeba øešit semafory apod.
+
+Položka první fronty ($pending_URLs) bude obyèejná øetìzcová hodnota. Položka druhé fronty ($visited_URLs) bude odkaz na hash:
+
+%result = ( URL => 'http://bla.com/jnjf', 
+            status_code => '200' );
+             
+
+pø.:
+
+use Thread::Queue;
+my $queue = new Thread::Queue;
+
+
+
+
+Nastavení klienta
+=================
+
+- Cookies
+- Browser
+- sub configure_client
+
+  
+Procedura do_request (sub do_request)
+====================
+Probìhne kontrola, jestli link neopustí doménu a jestli již na danou URL nebylo pøistoupeno. (sub prevent_duplicate) - použít s výhodou vlastnost hashe:
+
+$visited_URLs{'some URL'} = 1;
+
+Je to tak proto, abychom nemuseli poøád procházet frontu
+
+Zpracování odpovìdi
+===================
+
+Prvnì se musí zjistit, jaký HTTP kód jsme od serveru dostali. (sub is_OK) Naplní se result hash a strèí do fronty.
+Podle nastavení %check_settings se rozparsuje odpovìd (pravdìpodobnì requlárním výrazem) (sub get_URL_list)
+Pokud je nastavení $global_settings{'validation'} = 'doctype', provede se validace získané odpovìdi.
+Pokud je nastavení $global_settings{'validation'} = 'well-formed', provede se kontrola dobré strukturovanosti získané odpovìdi.
+(sub validate)
+
+
+Nastavení aplikace
+=====================
+
+Nastavení bude pøístupné ve dvou globálních hashích (asociativní pole). Nastavitelné bude následující:
+
+- maximální poèet vláken, které mohou bìžet souèasnì; defaultní hodnota bude 50,
+- interval mezi jednotlivými requesty v milisekundách; defaultní bude 0,
+- úroveò syntaktické kontroly stránky -- hodnoty: 
+  bez kontroly (none); dobøe strukturovaný (well-formed); validovat oproti DTD/XSD (doctype)
+
+  Všechny pøedešlá nastavení jsou uložena v hashi %global_settings
+
+- typy linkù, které bude crawler následovat:
+
+  <a href="URL" ></a>
+  <link href="URL" />
+  <img src="URL" />
+  <frame src="URL" >
+  <form action="URL" >
+  
+  CSS:
+  url('URL') (napr.: background-image: url('http://test.com/img') )
+
+  Defaultní bude kontrola <a href>. Uloženo to bude v hashi %check_settings.
+  
+
+
+  
+Hash tedy v defaultním nastavení bude vypadat takto:
+
+%check_settings = ( anchor_href => 1, 
+                    link_href => 0,
+                    img_src => 0,
+                    frame_src => 0,
+                    form_action => 0,
+                    css_url => 0 );
+                    
+%global_settings = ( max_thread_count => 50,
+                     request_interval => 0,
+                     validation => 'none', # dalsi mozne hodnoty: 'well-formed', 'doctype'
+                     check => \%check_settings ); # odkaz na hash %check_settings
+                      
+
+
+  
+
+
+
