@@ -44,6 +44,22 @@ sub configure_client {
 }
 
 # Comment ...
+sub get_URL_list {
+
+}
+
+# According to the settings subroutine makes validation of the page (URL).
+sub validate {
+
+}
+
+# Checks whether given URL was already requested.
+sub prevent_duplicate {
+
+}
+
+
+# Comment ...
 sub do_request {
 
 
@@ -52,6 +68,11 @@ sub do_request {
 # This subroutine makes HTTP request
 sub verify_URL {
 
+
+}
+
+# Comment ...
+sub is_OK() {
 
 }
 
