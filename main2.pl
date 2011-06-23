@@ -26,14 +26,15 @@ sub setup_environment {
   $links_waiting = new Thread::Queue; #array/buffer of links to be processed
   $results = new Thread::Queue; #array of links that have been processed with response codes.
   share(@processed_links); #shared array with all the links processed.
-  $domain; # domain to be checking, the script should not check links outside of this domain.
+  $domain; # domain to be checking, the script should not check links outside of this domain. Zada uzivatel (diky tomu bude mozne provadet check v cele domene 2. radu a nebo jen napr. v nejake subdomene - dle toho, co se zada)
+  $first_url; # prvni URL ke kontrole (zadava user) 
   
-  %check_settings = ( anchor_href => 1,
-                    link_href => 0,
-                    img_src => 0,
-                    frame_src => 0,
-                    form_action => 0,
-                    css_url => 0 );
+  %check_settings = ( a => 1,
+                    link => 0,
+                    img => 0,
+                    frame => 0,
+                  #  css_url => 0,   nevim jak by se resilo - je to naprosto odlisny od ostatnich odkazu
+                    form => 0 );
 
   %global_settings = ( max_thread_count => 10,
                      request_interval => 0,
@@ -45,11 +46,40 @@ sub setup_environment {
   $pending_empty = Thread::Semaphore -> new(1);
   $barrier = Thread::Semaphore -> new(0);
 
-
 }
 
 # Applies passed parameters to global settings from user
 sub apply_parameters {
+
+  print "Zadejte link k provereni: \n";
+  chomp  ($first_url = <STDIN>);
+  
+  print "Zadejte celou adresu domeny (subdomeny), v ramci ktere bude probihat kontrola odkazu: \n";
+  chomp  ($domain = <STDIN>);
+  
+  print "Kontrolovat odkazy typu <a href=\"URL\"></a>? (1=ano, 0=ne) \n";
+  chomp  ($check_settings{anchor_href} = <STDIN>); 
+  
+  print "Kontrolovat odkazy typu <link href=\"URL\" />? (1=ano, 0=ne) \n";
+  chomp  ($check_settings{link_href} = <STDIN>);    
+
+  print "Kontrolovat odkazy typu <img src=\"URL\" />? (1=ano, 0=ne) \n";
+  chomp  ($check_settings{img_src} = <STDIN>); 
+
+  print "Kontrolovat odkazy typu <frame src=\"URL\" >? (1=ano, 0=ne) \n";
+  chomp  ($check_settings{frame_src} = <STDIN>);
+  
+  print "Kontrolovat odkazy typu <form action=\"URL\" >? (1=ano, 0=ne) \n";
+  chomp  ($check_settings{form_action} = <STDIN>);
+  
+#  print "Kontrolovat odkazy v CSS? (1=ano, 0=ne) \n";
+#  chomp  ($check_settings{css_url} = <STDIN>);
+  
+  print "Zadejte maximalni pocet vlaken: \n";
+  chomp  (%global_settings{max_thread_count} = <STDIN>);
+  
+  print "Zadejte timeout pro vyprseni requestu: \n";
+  chomp  (%global_settings{timeout} = <STDIN>); 
 
 }
 
@@ -70,7 +100,15 @@ sub get_URL_list {
   # do some parsing:
   my $parsed_html = HTML::Parse::parse_html($body);
   
-  for ( @{ $parsed_html -> extract_links(qw(a link img frame form)) } ) # TAGS ARE TAKEN FROM SETTINGS!
+  # extrahovani tagu, ktere se maji kontrolovat z %check_settings, do retezce
+  my $tags = "";
+  while (($key, $value) = each(%check_settings)){
+    if ($value == 1) {
+      $tags = $tags . " " . $key;
+    }
+  } 
+  
+  for ( @{ $parsed_html -> extract_links(qw($tags)) } ) # TAGS ARE TAKEN FROM SETTINGS!
   { 
       my ($link) = @$_; # extract all links
       print "Zarazuji do fronty " . $link . "</br>\n"; # just a debugging print
@@ -88,7 +126,7 @@ sub validate {
 # Make a HTTP request for the URL in parameter.
 sub do_request {
   my $url = $_[0]; # define a URL from parameter
-  if (substr($url,0,1) eq "?") #shortened URL
+  if ( (substr($url,0,1) eq "?") or (substr($url,0,1) eq "/") ) #shortened URL, muze byt i relativni zacinajici znakem /
   {
     $url = $domain."/".$url;
     print "Menim URL ze zkracene na ".$url."</br>\n";
@@ -119,7 +157,11 @@ sub verify_URL {
           return 0;
           }
       }
-  # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!PRIDAT KONTROLU ZDA URL NEOPOUSTI DOMENU.    
+  # pokud to neni zkracena URL && domena neni obsazena v $url    
+  if ( ((substr($url,0,1) ne "?") || (substr($url,0,1) eq "/")) && (index($domain,$url) == -1) ) {
+    print "Odkaz ".$url." vede mimo zadanou domenu.</br>\n"; # just a debugging print
+    return 0;
+  }
   return 1; 
 }
 
@@ -130,9 +172,13 @@ sub move_to_processed {
  push(@processed_links, ($_[0]));
 }
 
-# Report results inside $processed_links
+# Report results inside $results
+# Nyni alespon ve forme jednoducheho vypisu url a kodu
 sub get_output {
-
+  for my $i (0 .. $results->pending() - 1){
+    my %record = $results->peek($i);
+    print "Kontrolovany odkaz: " . $record{URL} . ", kod: " . $record{status_code} . " \n";
+  }
 }
 
 # Code of the worker thread
@@ -190,8 +236,8 @@ sub worker_thread {
 
 setup_environment();
 apply_parameters();
-$domain = "http://www.skolkar.cz";
-$links_waiting -> enqueue($domain);
+
+$links_waiting -> enqueue($first_url);
 #$threads = threads->create('worker_thread'); # run 0. thread
 
 
