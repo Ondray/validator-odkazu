@@ -26,6 +26,8 @@ sub setup_environment {
   $links_waiting = new Thread::Queue; #array/buffer of links to be processed
   $results = new Thread::Queue; #array of links that have been processed with response codes.
   share(%processed_links); #shared array with all the links processed.
+  @results = ();
+  share(@results);
   $domain; # domain to be checking, the script should not check links outside of this domain.
   
   %check_settings = ( anchor_href => 1,
@@ -87,25 +89,11 @@ sub extract_content_links
 
 # Takes a URL in a parameter and extracts all URLs into the queue $links_waiting
 sub get_URL_list {
-  
+  my $status_code = $_[1];
   my @link_list = extract_content_links($_[0]);
   
   print threads->tid(). ": GET_URL_LIST --  Naslo se ". scalar(@link_list) . " linku.";
   print " Fronta obsahuje ". $links_waiting->pending() . " polozek. <br />\n";
-  
-  # if (scalar(@link_list) == 0)
-  # {
-    # 
-    # print threads->tid() ."#$%^& naslo se 0 URL. <br />\n";  
-      # 
-    # if ($links_waiting->pending() == 0)
-    # {
-      # #$waiting_thread_count++;
-      # print "#############"; 
-    # }
-  # }
-  
-  #print threads->tid() .": Vypis nalezenych URL\n";
   
   $mutex2->down();
   # flag - true when all URLs found in link_list are already visited; if the value stay equal 1 then all links were already visited
@@ -125,13 +113,13 @@ sub get_URL_list {
         #print "Menim URL ze zkracene na ".$link."</br>\n";
       }
       
-      if (verify_URL($link))
+      if (verify_URL($link, $status_code))
       {
         # adding links to the queue 
         $links_waiting -> enqueue($link); 
         print threads->tid() .": GET_URL_LIST -- Signal pro pending_empty. <br />\n";
         $pending_empty -> up();
-        $all_visited = 0;
+        #$all_visited = 0;
       }
   }    
 
@@ -204,7 +192,7 @@ sub is_leaving_domain
 # Check if the URL in the parameter is valid (that it doesn't leave the specified domain etc.) and that it hasn't been checked before.
 sub verify_URL {
   my $url = $_[0]; # define a URL from parameter
-  
+  my $status = $_[1];
   if ($processed_links{$url})
   {  
     # URL uz byla navstivena
@@ -214,8 +202,15 @@ sub verify_URL {
   else 
   {
     # pridat URL
-    $processed_links{$url} = 1;
-    
+    if ($status)
+    {
+      $processed_links{$url} = $status;
+    }
+    else 
+    {
+      $processed_links{$url} = 1;
+    }
+  
     return (! is_leaving_domain($url));
   }
     
@@ -224,12 +219,20 @@ sub verify_URL {
 # Insert the URL into $processed_links with the response code.
 sub move_to_processed {
  my %record = ("URL" => $_[0], "status_code" => $_[1] );
- $results->enqueue($record);
- #push(@processed_links, ($_[0]));
+ $results->enqueue(\%record);
+ push(@results, ($_[0]));
 }
 
 # Report results inside $processed_links
 sub get_output {
+  
+  print "Seznam nalezenych URL: ".keys(%processed_links)."\n";
+  foreach my $k (keys(%processed_links))
+  {
+    print $k.". Status code: ".$processed_links{$k}."\n";
+  
+  
+  }
 
 }
 
@@ -247,7 +250,7 @@ sub threads_count
   my $c = threads->list(threads::running);
   
   #return $c;
-  return 4;
+  return 10;
 }
 
 sub print_array 
@@ -259,20 +262,6 @@ sub print_array
     return $str;
 }
 
-sub others_finished
-{
-    $mutex1->down();
-    my $flag = 1;
-    for (my $i = 1; $i<=scalar(@finished_array); $i++)
-    {
-        if (($i != threads->tid()) && (! @finished_array[$i]))
-        {
-          $flag = 0;
-        }
-    }
-    $mutex1->up();
-    return $flag;
-}
 
 sub podminka
 {
@@ -333,10 +322,10 @@ sub worker_thread {
       my $html =  $response->content;  
       
       # loads all all the URLs from 1st parameter into the $links_waiting variable.
-      get_URL_list($html); 
+      get_URL_list($html, $code); 
       
       # Insert the URL into $processed_links with the response code. 
-      move_to_processed($_[0], $code); 
+      #move_to_processed($current_URL, $code); 
     
     }
 
@@ -352,9 +341,13 @@ sub worker_thread {
 # Code of the main thread
 # --------------------------
 
+$start = time();
+
+
 setup_environment();
 apply_parameters();
-$domain = "http://www.skolkar.cz";
+$domain = "http://www.bwindiorphans.org";
+#$domain = "http://www.skolkar.cz";
 $links_waiting -> enqueue($domain);
 
 for (1..$global_settings{max_thread_count})
@@ -362,30 +355,40 @@ for (1..$global_settings{max_thread_count})
   $finished_array[$_] = 0;  
 }
 
-# for (my $i = 0; $i < $global_settings{'max_thread_count'}; $i ++) 
-# {
-  # my $th = threads->create('worker_thread');
-# }  
 
 $th1 = threads->create('worker_thread');
 $th2 = threads->create('worker_thread');
 $th3 = threads->create('worker_thread');
 $th4 = threads->create('worker_thread');
+$th5 = threads->create('worker_thread');
+$th6 = threads->create('worker_thread');
+$th7 = threads->create('worker_thread');
+$th8 = threads->create('worker_thread');
+$th9 = threads->create('worker_thread');
+$th10 = threads->create('worker_thread');
+
+
 
 $th1->join();
 $th2->join();
 $th3->join();
 $th4->join();
+$th5->join();
+$th6->join();
+$th7->join();
+$th8->join();
+$th9->join();
+$th10->join();
 
-#$barrier -> down();
 
 print_threads();
 
-# foreach my $th (threads -> list()) 
-# {
-      # $th->kill(15)->join(); # nebo exit
-# }
-  
 get_output();
 
-# Thread::Delay
+$endtime = time();
+
+print "\n\nCas spusteni skriptu: " . scalar(localtime($start))."\n";
+print "Cas uknoceni skriptu: ". scalar(localtime($endtime))."\n";
+print "Celkovy cas: " . scalar(localtime($endtime-$start))."\n";
+print "Zkontrolovano URL: ". keys(%processed_links)."\n";
+
