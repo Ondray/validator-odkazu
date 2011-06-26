@@ -135,7 +135,10 @@ sub get_URL_list {
     print threads->tid() . ": GET_URL_LIST -- Vsechna nalezena URL uz byla navstivena.";
     $waiting_thread_count++;
     print "Zapisuji na index ".threads->tid(). "<br />\n";
+    print threads->tid().": Finished array: " . print_array(@finished_array)."\n";
     $finished_array[threads->tid()] = 1;
+    
+    print threads->tid().": Finished array: " . print_array(@finished_array)."\n";
   }
   
   $mutex2->up();
@@ -282,6 +285,9 @@ sub worker_thread {
          # $bariera->up();
       # }  
       
+      # Tohle je asi FAIL!!!
+      $finished_array[threads->tid()] = 1;
+      
       if (others_finished())
       {
         $bariera->up();
@@ -331,10 +337,15 @@ apply_parameters();
 $domain = "http://www.skolkar.cz";
 $links_waiting -> enqueue($domain);
 
+for (1..$global_settings{max_thread_count})
+{
+  $finished_array[$_] = 0;  
+}
+
 for (my $i = 0; $i < $global_settings{'max_thread_count'}; $i ++) 
 {
   my $th = threads->create('worker_thread');
-  $finished_array[$th->tid()] = 0;
+  
 }  
 
 
