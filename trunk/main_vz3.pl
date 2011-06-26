@@ -46,7 +46,13 @@ sub setup_environment {
   $barrier = Thread::Semaphore -> new(0);
   share ($barrier);
   our $waiting_thread_count :shared = 0 ;
-
+  
+  @finished_array = ();
+  share(@finished_array);
+  
+  $mutex1 = Thread::Semaphore->new(1);
+  $mutex2 = Thread::Semaphore->new(1);
+  
 }
 
 # Applies passed parameters to global settings from user
@@ -78,7 +84,7 @@ sub get_URL_list {
   
   my @link_list = extract_content_links($_[0]);
   
-  print threads->tid(). ": Naslo se ". scalar(@link_list) . " linku.";
+  print threads->tid(). ": GET_URL_LIST --  Naslo se ". scalar(@link_list) . " linku.";
   print " Fronta obsahuje ". $links_waiting->pending() . " polozek. <br />\n";
   
   if (scalar(@link_list) == 0)
@@ -95,6 +101,7 @@ sub get_URL_list {
   
   #print threads->tid() .": Vypis nalezenych URL\n";
   
+  $mutex2->down();
   # flag - true when all URLs found in link_list are already visited; if the value stay equal 1 then all links were already visited
   $all_visited = 1;
   
@@ -116,7 +123,7 @@ sub get_URL_list {
       {
         # adding links to the queue 
         $links_waiting -> enqueue($link); 
-        print threads->tid() .": Signal pro pending_empty. <br />\n";
+        print threads->tid() .": GET_URL_LIST -- Signal pro pending_empty. <br />\n";
         $pending_empty -> up();
         $all_visited = 0;
       }
@@ -125,10 +132,13 @@ sub get_URL_list {
 
   if ($all_visited)
   {
-    print threads->tid() . ": Vsechna nalezena URL uz byla navstivena.<br />\n";
+    print threads->tid() . ": GET_URL_LIST -- Vsechna nalezena URL uz byla navstivena.";
     $waiting_thread_count++;
+    print "Zapisuji na index ".threads->tid(). "<br />\n";
+    $finished_array[threads->tid()] = 1;
   }
   
+  $mutex2->up();
 }
 
 # According to the settings subroutine makes validation of the page.
@@ -178,7 +188,7 @@ sub is_leaving_domain
       print threads->tid().": IS_LEAVING_DOMAIN -- Odkaz vede mimo domenu. <br />\n";
       return 1;
   }
-  
+  print threads->tid().": IS_LEAVING_DOMAIN -- Odkaz je OK. <br />\n";
   return 0;
 }
 
@@ -230,33 +240,65 @@ sub threads_count
   return $c;
 }
 
+sub print_array 
+{
+    my $str = '';
+    foreach my $item (@_) {
+      $str.= $item. " "; 
+    }
+    return $str;
+}
+
+sub others_finished
+{
+    $mutex1->down();
+    my $flag = 1;
+    for (my $i = 1; $i<=scalar(@finished_array); $i++)
+    {
+        if (($i != threads->tid()) && (! @finished_array[$i]))
+        {
+          $flag = 0;
+        }
+    }
+    $mutex1->up();
+    return $flag;
+}
+
 # Code of the worker thread
 sub worker_thread {
   
   while (1)
   {
-    
-    print threads->tid() .": Pending links: " . $links_waiting -> pending() . "<br />\n";
-    print threads->tid() .": Pocet cekajicich vlaken: $waiting_thread_count <br />\n";
+    print threads->tid() .": Nova iterace! Finished array: " . print_array(@finished_array)."\n";
+    print threads->tid() .": WORKER_THREAD -- Pending links: " . $links_waiting -> pending() . "<br />\n";
+    #print threads->tid() .": WORKER_THREAD -- Pocet cekajicich vlaken: $waiting_thread_count <br />\n";
 
     if ($links_waiting -> pending() == 0)
     {
-      if ($waiting_thread_count + 1 == threads_count())
+      # if ($waiting_thread_count + 1 == threads_count())
+      # {
+         # # posledni vlakno vzbudi hlavni proces
+         # print threads->tid() .": WORKER_THREAD -- Predavam rizeni";
+         # $bariera->up();
+      # }  
+      
+      if (others_finished())
       {
-         # posledni vlakno vzbudi hlavni proces
-         print "Predavam rizeni";
-         $bariera->up();
-      }  
+        $bariera->up();
+      }
     }
     
+    
+    
     # tady se zastavi, kdyz bude fronta prazdna
-    print threads->tid() .": Semafor - pending_empty<br />\n";
+    print threads->tid() .": WORKER_THREAD -- Semafor - pending_empty<br />\n";
     $pending_empty->down();
-    print threads->tid() .": Opustilo semafor pending_empty<br />\n";
+    print threads->tid() .": WORKER_THREAD -- Opustilo semafor pending_empty<br />\n";
       
     my $current_URL = $links_waiting -> dequeue();
+    $finished_array[threads->tid()] = 0;
     
-    print threads->tid() . ": URL being visited: " . $current_URL . "<br />\n";
+    print threads->tid() . ": WORKER_THREAD -- URL being visited: " . $current_URL . "<br />\n";
     
     if ($current_URL)
     {
@@ -292,7 +334,9 @@ $links_waiting -> enqueue($domain);
 for (my $i = 0; $i < $global_settings{'max_thread_count'}; $i ++) 
 {
   my $th = threads->create('worker_thread');
+  $finished_array[$th->tid()] = 0;
 }  
+
 
 $barrier -> down();
 
